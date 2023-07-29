@@ -11,7 +11,7 @@ import os
 import sys
 import struct
 
-VERSION = (0, 3, 3)
+VERSION = (0, 4, 0)
 
 class File():
 	"""
@@ -48,6 +48,63 @@ class File():
 		
 		self.file.close()
 
+class Patcher:
+	"""
+	Instance of a patching tool
+	"""
+	
+	def __init__(self):
+		self.patches = {}
+		self.buttons = {}
+	
+	def add(self, name, desc, func, default = False, value = False):
+		"""
+		Add a patch to the list of patches
+		"""
+		
+		self.patches[name] = {
+			"desc": desc,
+			"func": func,
+			"default": default,
+			"value": value,
+		}
+	
+	def getFunc(self, name):
+		"""
+		Get the patch function to call
+		"""
+		
+		return self.patches[name]["func"]
+	
+	def render(self, w):
+		"""
+		Add everything to the window
+		"""
+		
+		for p in self.patches:
+			self.buttons[p] = w.checkbox(self.patches[p]["desc"], default = self.patches[p]["default"])
+			
+			# Also show the textbox if we need it
+			if (self.patches[p]["value"]):
+				self.buttons[f"{p}_val"] = w.textbox(True)
+			
+			# Next element (for two row layout)
+			w.next()
+	
+	def getData(self):
+		"""
+		Get the options that the user has selected
+		"""
+		
+		data = {}
+		
+		for k in self.buttons:
+			data[k] = self.buttons[k].get()
+		
+		return data
+
+gPatcher = Patcher()
+
 def patch_const_mov_instruction_arm64(old, value):
 	mask = 0b11100000111111110001111100000000
 	
@@ -79,6 +136,13 @@ def patch_antitamper(f, value):
 	f.patch(0x475b4, b"\xff\xfd\xff\x17")
 	f.patch(0x46360, b"\x13\x00\x00\x14")
 
+gPatcher.add(
+	name = "antitamper",
+	desc = "Disable anti-tamper protection (required)",
+	func = patch_antitamper,
+	default = True,
+)
+
 def patch_premium(f, value):
 	tkinter.messagebox.showwarning("Software copyright notice", "APKs where premium is patched should NOT be distrubuted, and this functionality is only available for users to extercise their right to modify software that they own for private use. If you do not own premium, you should delete the patched file immediately.")
 	
@@ -89,9 +153,21 @@ def patch_premium(f, value):
 	f.patch(0x57864, b"\xbc\x00\x00\x14")
 	f.patch(0x566ec, b"\x04\x00\x00\x14")
 
+gPatcher.add(
+	name = "premium",
+	desc = "Enable premium by default",
+	func = patch_premium,
+)
+
 def patch_encryption(f, value):
 	f.patch(0x567e8, b"\xc0\x03\x5f\xd6")
 	f.patch(0x5672c, b"\xc0\x03\x5f\xd6")
+
+gPatcher.add(
+	name = "encryption",
+	desc = "Disable save file encryption",
+	func = patch_encryption,
+)
 
 def patch_key(f, value):
 	if (not value):
@@ -106,6 +182,13 @@ def patch_key(f, value):
 	
 	f.patch(0x1f3ca8, key + (b"\x00" * (24 - len(key))))
 
+gPatcher.add(
+	name = "encryption_key",
+	desc = "Change encryption key to:",
+	func = patch_key,
+	value = True,
+)
+
 def patch_balls(f, value):
 	if (not value):
 		tkinter.messagebox.showerror("Patch balls error", "You didn't put in a value for how many balls you want to start with. Balls won't be patched!")
@@ -118,6 +201,13 @@ def patch_balls(f, value):
 	f.patch(0x57cf4, struct.pack(">I", patch_const_mov_instruction_arm64(d, value)))
 	
 	f.patch(0x57ff8, struct.pack("<I", value))
+
+gPatcher.add(
+	name = "balls",
+	desc = "Change starting ballcount to:",
+	func = patch_balls,
+	value = True,
+)
 
 def patch_hit(f, value):
 	if (not value):
@@ -138,12 +228,26 @@ def patch_hit(f, value):
 	# need to make a specific patch for the comparision.
 	f.patch(0x7162c, b"\xff\x02\x01\x6b")
 
+gPatcher.add(
+	name = "hit",
+	desc = "Change crash ball loss to:",
+	func = patch_hit,
+	value = True,
+)
+
 def patch_fov(f, value):
 	if (not value):
 		tkinter.messagebox.showerror("Patch FoV error", "You didn't put in a value for the FoV you want. FoV won't be patched!")
 		return
 	
 	f.patch(0x1c945c, struct.pack("<f", float(value)))
+
+gPatcher.add(
+	name = "fov",
+	desc = "Change field of view to:",
+	func = patch_fov,
+	value = True,
+)
 
 def patch_seconds(f, value):
 	value = float(value) if value else ""
@@ -157,15 +261,58 @@ def patch_seconds(f, value):
 	# Smash Hit normalises the value to the range [0.0, 1.0] so we need to take the inverse
 	f.patch(0x73f80, struct.pack("<f", 1 / value))
 
+gPatcher.add(
+	name = "seconds",
+	desc = "Change time per room in seconds to:",
+	func = patch_seconds,
+	value = True,
+)
+
+def patch_hitsomething(f, value):
+	f.patch(0x71574, b"\xc0\x03\x5f\xd6")
+
+gPatcher.add(
+	name = "hitsomething",
+	desc = "Remove penalty for hitting obstacles (no clip)",
+	func = patch_hitsomething,
+)
+
+def patch_trainingballs(f, value):
+	f.patch(0x6ba5c, b"\x06\x00\x00\x14")
+
+gPatcher.add(
+	name = "trainingballs",
+	desc = "Remove ball limit in training mode",
+	func = patch_trainingballs,
+)
+
 def patch_realpaths_segments(f, value):
 	f.patch(0x2119f8, b"\x00")
+
+gPatcher.add(
+	name = "realpaths_segments",
+	desc = "Use full paths for segments",
+	func = patch_realpaths_segments,
+)
 
 def patch_realpaths_obstacles(f, value):
 	f.patch(0x211930, b"\x00")
 
-def patch_realpaths(f, value):
+gPatcher.add(
+	name = "realpaths_segments",
+	desc = "Use full paths for obstacles",
+	func = patch_realpaths_obstacles,
+)
+
+def patch_realpaths_other(f, value):
 	f.patch(0x2118e8, b"\x00")
 	f.patch(0x1f48c0, b"\x00")
+
+gPatcher.add(
+	name = "realpaths_other",
+	desc = "Use full paths for rooms and levels",
+	func = patch_realpaths_other,
+)
 
 def patch_ads(f, value):
 	if (len(value) != 5):
@@ -177,7 +324,14 @@ def patch_ads(f, value):
 	f.patch(0x2129a0, b"http://smashhitlab.000webhostapp.com/\x00")
 	f.patch(0x2129c8, b"ads.php?id=" + value + b"&x=\x00")
 
-def patch_package(f, value):
+gPatcher.add(
+	name = "ads",
+	desc = "Use Smash Hit Lab mod services",
+	func = patch_ads,
+	value = True,
+)
+
+def patch_os_package_io(f, value):
 	### This was the THIRD ATTEMPT to make it work.
 	# It works by chaining it on after luaopen_base
 	# This one worked, even if its the worst hack :D
@@ -191,31 +345,41 @@ def patch_package(f, value):
 	f.patch(0xa7004, b"\xa0\x00\x80\x52") # Set return to 5 (2 + 1 + 1 + 1 = 5)
 	f.patch(0xa7010, b"\xc0\x03\x5f\xd6") # Make sure last is return (not really needed)
 
+gPatcher.add(
+	name = "modules1",
+	desc = "Enable lua's os and io modules",
+	func = patch_os_package_io,
+)
+
 def patch_vertical(f, value):
 	f.patch(0x46828, b"\x47\x00\x00\x14") # Patch an if (gWidth < gHeight)
 	f.patch(0x4693c, b"\x71\x00\x00\x14") # Another if ...
 	f.patch(0x46a48, b"\x1f\x20\x03\xd5")
 
-def patch_roomlength(f, value):
-	f.patch(0x6b6d4, b"\x1f\x20\x03\xd5") # Patch to use length property instead of 200 in versus/co-op
+gPatcher.add(
+	name = "vertical",
+	desc = "Allow running in vertical resolutions",
+	func = patch_vertical,
+)
 
-PATCH_LIST = {
-	"antitamper": patch_antitamper,
-	"premium": patch_premium,
-	"encryption": patch_encryption,
-	"key": patch_key,
-	"balls": patch_balls,
-	"hit": patch_hit,
-	"fov": patch_fov,
-	"seconds": patch_seconds,
-	"realpaths_segments": patch_realpaths_segments,
-	"realpaths_obstacles": patch_realpaths_obstacles,
-	"realpaths": patch_realpaths,
-	"ads": patch_ads,
-	"package": patch_package,
-	"vertical": patch_vertical,
-	"roomlength": patch_roomlength,
-}
+def patch_multiplayer_length(f, value):
+	# Patch to use length property instead of 200 in versus/co-op
+	f.patch(0x6b6d4, b"\x1f\x20\x03\xd5")
+
+gPatcher.add(
+	name = "multiplayer_length",
+	desc = "Enable mgLength in multiplayer mode",
+	func = patch_multiplayer_length,
+)
+
+def patch_nofpfix(f, value):
+	f.patch(0x72564, b"\x1f\x20\x03\xd5")
+
+gPatcher.add(
+	name = "nofpfix",
+	desc = "Disable resetting camera position",
+	func = patch_nofpfix,
+)
 
 def applyPatches(location, patches):
 	"""
@@ -234,7 +398,7 @@ def applyPatches(location, patches):
 		# ... that is actually a patch and is wanted ...
 		if (not p.endswith("_val") and patches[p] == True):
 			# ... do the patch, also passing (PATCHNAME) + "_val" if it exists.
-			(PATCH_LIST[p])(f, patches.get(p + "_val", None))
+			(gPatcher.getFunc(p))(f, patches.get(p + "_val", None))
 
 # ==============================================================================
 # ==============================================================================
@@ -257,16 +421,23 @@ class Window():
 		self.gap = 35
 		self.current = 0
 		
+		# HACK to make the things to into two rows
+		self.count = 0
+		
 		# Main frame
 		ttk.Frame(self.window)
 	
-	def getXPosTB(self):
-		return 10 + 500 * (self.gap % 2)
-	
 	def getYPos(self, flush = False):
-		self.position += self.gap if not flush else 0
+		self.position += self.gap if not flush and (self.count % 2 == 0) else 0
 		
 		return self.position
+	
+	def getXPos(self):
+		return 20
+	
+	def getExtraXPos(self):
+		# for the hack
+		return (515 + self.getXPos()) * (self.count % 2)
 	
 	def label(self, content):
 		"""
@@ -274,13 +445,13 @@ class Window():
 		"""
 		
 		label = tkinter.Label(self.window, text = content)
-		label.place(x = 10, y = self.getYPos())
+		label.place(x = self.getXPos(), y = self.getYPos())
 		
 		return label
 	
-	def button(self, content, action):
+	def button(self, content, action, *, extraY = 0, absY = None):
 		button = tkinter.Button(self.window, text = content, command = action)
-		button.place(x = 10, y = self.getYPos())
+		button.place(x = self.getXPos(), y = (self.getYPos() + extraY) if not absY else absY)
 		
 		return button
 	
@@ -292,9 +463,9 @@ class Window():
 		entry = tkinter.Entry(self.window, width = (70 if not inline else 28))
 		
 		if (not inline):
-			entry.place(x = 10, y = self.getYPos())
+			entry.place(x = self.getXPos() + self.getExtraXPos(), y = self.getYPos())
 		else:
-			entry.place(x = 300, y = self.getYPos(True))
+			entry.place(x = (self.getXPos() + 290) + self.getExtraXPos(), y = self.getYPos(True))
 		
 		return entry
 	
@@ -306,49 +477,34 @@ class Window():
 		var = tkinter.IntVar()
 		
 		tick = tkinter.Checkbutton(self.window, text = content, variable = var, onvalue = 1, offvalue = 0)
-		tick.place(x = 10, y = self.getYPos())
+		tick.place(x = self.getXPos() + self.getExtraXPos(), y = self.getYPos())
 		
 		var.set(1 if default else 0)
 		
+		# self.count += 1
+		
 		return var
+	
+	def next(self):
+		self.count += 1
 	
 	def main(self):
 		self.window.mainloop()
 
 def gui(default_path = None):
-	w = Window(f"Smash Hit Binary Modification Tool v{VERSION[0]}.{VERSION[1]}.{VERSION[2]} (by Knot126)", "510x680")
+	w = Window(f"Smash Hit Tweak Tool v{VERSION[0]}.{VERSION[1]}.{VERSION[2]}", "1100x500")
 	
-	w.label("This tool will let you add common patches to Smash Hit's main binary.")
+	w.label("You can use this tool to apply common tweaks to Smash Hit's main binary. (Only compatible with v1.4.2 and v1.4.3 on ARM64.)")
 	
 	location = default_path
 	
 	if (not location):
 		location = tkinter.filedialog.askopenfilename(title = "Pick libsmashhit.so", filetypes = (("Shared objects", "*.so"), ("All files", "*.*")))
 	
-	w.label("(Note: If you have issues typing in boxes, try clicking off and on the window first.)")
+	w.label("If you have issues typing in boxes, try clicking off and on the window first.")
 	w.label("Please select what patches you would like to apply:")
 	
-	antitamper = w.checkbox("Disable anti-tamper protection (required)", default = True)
-	premium = w.checkbox("Enable premium by default")
-	encryption = w.checkbox("Nop out save encryption functions")
-	key = w.checkbox("Set encryption key to (string):")
-	key_val = w.textbox(True)
-	balls = w.checkbox("Set the starting ball count to (integer):")
-	balls_val = w.textbox(True)
-	hit = w.checkbox("Change dropped balls when hit to (integer):")
-	hit_val = w.textbox(True)
-	fov = w.checkbox("Set the field of view to (float):")
-	fov_val = w.textbox(True)
-	seconds = w.checkbox("Set the room time in seconds to (float):")
-	seconds_val = w.textbox(True)
-	ads = w.checkbox("Enable the Ad Service using mod ID (5 char string):")
-	ads_val = w.textbox(True)
-	realpaths_segments = w.checkbox("Use absolute paths for segments")
-	realpaths_obstacles = w.checkbox("Use absolute paths for obstacles")
-	realpaths = w.checkbox("Use absolute paths for rooms and levels")
-	package = w.checkbox("Load package, io and os modules in scripts")
-	vertical = w.checkbox("Allow running in vertical resolutions")
-	roomlength = w.checkbox("Allow using room length property in versus/co-op instead of sticking to 200")
+	gPatcher.render(w)
 	
 	def x():
 		"""
@@ -356,29 +512,7 @@ def gui(default_path = None):
 		"""
 		
 		try:
-			patches = {
-				"antitamper": antitamper.get(),
-				"premium": premium.get(),
-				"encryption": encryption.get(),
-				"key": key.get(),
-				"key_val": key_val.get(),
-				"balls": balls.get(),
-				"balls_val": balls_val.get(),
-				"fov": fov.get(),
-				"fov_val": fov_val.get(),
-				"hit": hit.get(),
-				"hit_val": hit_val.get(),
-				"seconds": seconds.get(),
-				"seconds_val": seconds_val.get(),
-				"ads": ads.get(),
-				"ads_val": ads_val.get(),
-				"realpaths_segments": realpaths_segments.get(),
-				"realpaths_obstacles": realpaths_obstacles.get(),
-				"realpaths": realpaths.get(),
-				"package": package.get(),
-				"vertical": vertical.get(),
-				"roomlength": roomlength.get(),
-			}
+			patches = gPatcher.getData()
 			
 			applyPatches(location.get() if type(location) != str else location, patches)
 			
@@ -387,7 +521,7 @@ def gui(default_path = None):
 		except Exception as e:
 			tkinter.messagebox.showerror("Error", str(e))
 	
-	w.button("Patch game binary!", x)
+	w.button("Patch game binary!", x, absY = 500 - 60)
 	
 	w.main()
 
